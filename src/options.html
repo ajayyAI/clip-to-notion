@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>X to Notion Setup</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel">
+        <h1>X to Notion Idea Saver</h1>
+        <p class="subtitle">Connect Notion once, then save posts from x.com in one click.</p>
+
+        <ol class="setup-steps">
+          <li>Create a Notion internal integration and copy its secret token.</li>
+          <li>Create a database with the required properties listed below.</li>
+          <li>Share that database with your integration in Notion.</li>
+        </ol>
+
+        <form id="settingsForm">
+          <label class="field">
+            <span>Notion integration token</span>
+            <input
+              id="notionToken"
+              name="notionToken"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="secret_..."
+              required
+            />
+          </label>
+
+          <label class="field">
+            <span>Notion database ID</span>
+            <input
+              id="notionDatabaseId"
+              name="notionDatabaseId"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="e.g. 12345678-1234-1234-1234-123456789abc"
+              required
+            />
+          </label>
+
+          <label class="checkbox">
+            <input id="enabledOnX" name="enabledOnX" type="checkbox" checked />
+            <span>Enable save button on x.com</span>
+          </label>
+
+          <div class="actions">
+            <button type="button" id="testConnectionButton" class="ghost">Test connection</button>
+            <button type="submit" id="saveButton">Save settings</button>
+          </div>
+        </form>
+
+        <p id="statusMessage" class="status" aria-live="polite"></p>
+
+        <details class="requirements">
+          <summary>Required Notion database properties</summary>
+          <ul>
+            <li><code>Title</code> (title)</li>
+            <li><code>Post URL</code> (url)</li>
+            <li><code>Author</code> (rich_text)</li>
+            <li><code>Content</code> (rich_text)</li>
+            <li><code>Posted At</code> (date)</li>
+            <li><code>Saved At</code> (date)</li>
+            <li><code>Source</code> (select)</li>
+          </ul>
+        </details>
+      </section>
+    </main>
+
+    <script src="shared-core.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

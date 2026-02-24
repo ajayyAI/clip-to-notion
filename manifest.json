@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "X to Notion Idea Saver",
+  "version": "0.1.0",
+  "description": "Save X posts to a Notion database with one click.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://x.com/*", "https://api.notion.com/*"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*"],
+      "js": ["src/shared-core.js", "src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "X to Notion Idea Saver"
+  },
+  "options_page": "src/options.html"
+}

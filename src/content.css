@@ -1,0 +1,77 @@
+.x2n-save-wrap {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.x2n-save-button {
+  border: 1px solid rgba(15, 20, 25, 0.2);
+  background: #ffffff;
+  color: #0f1419;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.x2n-save-button:hover {
+  background: rgba(15, 20, 25, 0.08);
+  border-color: rgba(15, 20, 25, 0.35);
+}
+
+.x2n-save-button:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.x2n-save-button[data-state="saved"] {
+  border-color: #0f8f6f;
+  color: #0f8f6f;
+}
+
+.x2n-save-button[data-state="already"] {
+  border-color: #c26f00;
+  color: #c26f00;
+}
+
+.x2n-save-button[data-state="error"] {
+  border-color: #c93c37;
+  color: #c93c37;
+}
+
+.x2n-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483647;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.x2n-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.x2n-toast[data-tone="success"] {
+  background: #11775e;
+}
+
+.x2n-toast[data-tone="error"] {
+  background: #b8342f;
+}
+
+.x2n-toast[data-tone="info"] {
+  background: #1f6feb;
+}
