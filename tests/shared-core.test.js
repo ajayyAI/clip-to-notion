@@ -13,12 +13,39 @@ test("normalizePostUrl canonicalizes valid x.com and twitter.com URLs", () => {
     "https://x.com/naval/status/1938273648273648"
   );
   assert.equal(core.normalizePostUrl("/naval/status/1938273648273648"), "https://x.com/naval/status/1938273648273648");
+  assert.equal(
+    core.normalizePostUrl("https://x.com/i/web/status/1938273648273648"),
+    "https://x.com/i/web/status/1938273648273648"
+  );
+  assert.equal(
+    core.normalizePostUrl("https://twitter.com/i/status/1938273648273648?ref=abc"),
+    "https://x.com/i/web/status/1938273648273648"
+  );
 });
 
 test("normalizePostUrl rejects invalid status URLs", () => {
   assert.equal(core.normalizePostUrl("https://x.com/home"), null);
   assert.equal(core.normalizePostUrl("https://example.com/naval/status/1"), null);
   assert.equal(core.normalizePostUrl("not-a-url"), null);
+});
+
+test("extractStatusIdFromPostUrl supports canonical and i/web links", () => {
+  assert.equal(core.extractStatusIdFromPostUrl("https://x.com/naval/status/1938273648273648"), "1938273648273648");
+  assert.equal(core.extractStatusIdFromPostUrl("https://x.com/i/web/status/1938273648273648"), "1938273648273648");
+  assert.equal(core.extractStatusIdFromPostUrl("/i/status/1938273648273648"), "1938273648273648");
+  assert.equal(core.extractStatusIdFromPostUrl("https://x.com/home"), null);
+});
+
+test("buildCanonicalPostUrl chooses handle format when available", () => {
+  assert.equal(
+    core.buildCanonicalPostUrl("1938273648273648", "naval"),
+    "https://x.com/naval/status/1938273648273648"
+  );
+  assert.equal(
+    core.buildCanonicalPostUrl("1938273648273648", ""),
+    "https://x.com/i/web/status/1938273648273648"
+  );
+  assert.equal(core.buildCanonicalPostUrl("", "naval"), null);
 });
 
 test("normalizeDatabaseId accepts raw IDs and notion URLs", () => {
@@ -49,4 +76,28 @@ test("buildAuthorLabel combines name and handle", () => {
 test("normalizeISODate returns null for invalid date values", () => {
   assert.equal(core.normalizeISODate("invalid"), null);
   assert.match(core.normalizeISODate("2025-11-20T10:00:00Z"), /^2025-11-20T10:00:00\.000Z$/);
+});
+
+test("evaluateDatabaseSchema detects missing and mismatched properties", () => {
+  const result = core.evaluateDatabaseSchema({
+    Title: { type: "title" },
+    "Post URL": { type: "rich_text" },
+    "Saved At": { type: "date" },
+    Source: { type: "multi_select" }
+  });
+
+  assert.deepEqual(result.missingRequired, []);
+  assert.deepEqual(result.missingOptional, ["Author", "Content", "Posted At"]);
+  assert.deepEqual(result.mismatchedRequired, [{ name: "Post URL", expected: "url", actual: "rich_text" }]);
+  assert.deepEqual(result.mismatchedOptional, [{ name: "Source", expected: "select", actual: "multi_select" }]);
+  assert.equal(result.isWriteSafe, false);
+});
+
+test("evaluateDatabaseSchema marks minimum write-safe schema", () => {
+  const result = core.evaluateDatabaseSchema({
+    Title: { type: "title" },
+    "Post URL": { type: "url" },
+    "Saved At": { type: "date" }
+  });
+  assert.equal(result.isWriteSafe, true);
 });

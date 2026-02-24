@@ -16,6 +16,19 @@
     enabledOnX: "enabledOnX"
   };
 
+  const REQUIRED_DATABASE_SCHEMA = {
+    Title: "title",
+    "Post URL": "url",
+    "Saved At": "date"
+  };
+
+  const OPTIONAL_DATABASE_SCHEMA = {
+    Author: "rich_text",
+    Content: "rich_text",
+    "Posted At": "date",
+    Source: "select"
+  };
+
   function normalizeWhitespace(input) {
     if (typeof input !== "string") {
       return "";
@@ -34,32 +47,75 @@
     return normalized.slice(0, maxLength - 1).trimEnd() + "…";
   }
 
-  function normalizePostUrl(rawUrl) {
+  function parseRawUrl(rawUrl) {
     if (typeof rawUrl !== "string" || rawUrl.trim() === "") {
       return null;
     }
-
-    let parsed;
     try {
       const maybeAbsolute = rawUrl.startsWith("/") ? `https://x.com${rawUrl}` : rawUrl;
-      parsed = new URL(maybeAbsolute);
+      return new URL(maybeAbsolute);
     } catch (_error) {
       return null;
     }
+  }
 
-    const host = parsed.hostname.toLowerCase();
-    if (host !== "x.com" && host !== "www.x.com" && host !== "twitter.com" && host !== "www.twitter.com") {
+  function isSupportedXHost(hostname) {
+    const host = String(hostname || "").toLowerCase();
+    return host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com";
+  }
+
+  function sanitizeHandle(rawHandle) {
+    const handle = normalizeWhitespace(rawHandle).replace(/^@/, "");
+    if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+      return "";
+    }
+    return handle;
+  }
+
+  function extractStatusIdFromPostUrl(rawUrl) {
+    const parsed = parseRawUrl(rawUrl);
+    if (!parsed || !isSupportedXHost(parsed.hostname)) {
       return null;
     }
 
-    const pathMatch = parsed.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/);
-    if (!pathMatch) {
+    const match = parsed.pathname.match(/\/status\/(\d+)/);
+    if (!match) {
+      return null;
+    }
+    return match[1];
+  }
+
+  function buildCanonicalPostUrl(statusId, rawHandle) {
+    const normalizedStatusId = normalizeWhitespace(statusId);
+    if (!/^\d{5,}$/.test(normalizedStatusId)) {
       return null;
     }
 
-    const handle = pathMatch[1];
-    const statusId = pathMatch[2];
-    return `https://x.com/${handle}/status/${statusId}`;
+    const handle = sanitizeHandle(rawHandle);
+    if (handle) {
+      return `https://x.com/${handle}/status/${normalizedStatusId}`;
+    }
+    return `https://x.com/i/web/status/${normalizedStatusId}`;
+  }
+
+  function normalizePostUrl(rawUrl) {
+    const parsed = parseRawUrl(rawUrl);
+    if (!parsed) {
+      return null;
+    }
+
+    if (!isSupportedXHost(parsed.hostname)) {
+      return null;
+    }
+
+    const statusId = extractStatusIdFromPostUrl(parsed.href);
+    if (!statusId) {
+      return null;
+    }
+
+    const handleMatch = parsed.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/\d+/);
+    const handle = handleMatch && handleMatch[1].toLowerCase() !== "i" ? handleMatch[1] : "";
+    return buildCanonicalPostUrl(statusId, handle);
   }
 
   function extractHandleFromPostUrl(postUrl) {
@@ -145,18 +201,67 @@
     return name;
   }
 
+  function evaluateDatabaseSchema(properties) {
+    const safeProperties = properties && typeof properties === "object" ? properties : {};
+
+    const result = {
+      missingRequired: [],
+      missingOptional: [],
+      mismatchedRequired: [],
+      mismatchedOptional: []
+    };
+
+    for (const [propertyName, expectedType] of Object.entries(REQUIRED_DATABASE_SCHEMA)) {
+      const current = safeProperties[propertyName];
+      if (!current) {
+        result.missingRequired.push(propertyName);
+        continue;
+      }
+      if (current.type !== expectedType) {
+        result.mismatchedRequired.push({
+          name: propertyName,
+          expected: expectedType,
+          actual: current.type || "unknown"
+        });
+      }
+    }
+
+    for (const [propertyName, expectedType] of Object.entries(OPTIONAL_DATABASE_SCHEMA)) {
+      const current = safeProperties[propertyName];
+      if (!current) {
+        result.missingOptional.push(propertyName);
+        continue;
+      }
+      if (current.type !== expectedType) {
+        result.mismatchedOptional.push({
+          name: propertyName,
+          expected: expectedType,
+          actual: current.type || "unknown"
+        });
+      }
+    }
+
+    result.isWriteSafe = result.missingRequired.length === 0 && result.mismatchedRequired.length === 0;
+    return result;
+  }
+
   return {
     NOTION_API_BASE,
     NOTION_VERSION,
     STORAGE_KEYS,
+    REQUIRED_DATABASE_SCHEMA,
+    OPTIONAL_DATABASE_SCHEMA,
     normalizeWhitespace,
     truncate,
     normalizePostUrl,
+    extractStatusIdFromPostUrl,
+    buildCanonicalPostUrl,
     extractHandleFromPostUrl,
     normalizeISODate,
     normalizeDatabaseId,
     isLikelyNotionToken,
     buildTitle,
-    buildAuthorLabel
+    buildAuthorLabel,
+    evaluateDatabaseSchema
   };
 });

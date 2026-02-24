@@ -1,50 +1,75 @@
 # X to Notion Idea Saver
 
-Chrome extension (Manifest V3) that adds a **Save to Notion** button on posts in `x.com`.
+Production-grade Chrome extension (Manifest V3) for capturing X post ideas directly into Notion.
 
-When you click it, the extension sends the post metadata to a Notion database and prevents duplicates by canonical post URL.
+## Core behavior
 
-## What is included
+- Injects a resilient `Save idea` action onto X posts
+- Saves post URL + metadata to Notion with one click
+- Prevents duplicates by canonical post URL
+- Handles repeated rapid clicks with in-flight dedupe locks
+- Maps common Notion errors into clear UX messages
 
-- Button injection on X posts
-- One-click save to Notion
-- Duplicate detection (`Post URL`)
-- Options page for token + database setup
-- Connection test with schema checks
-- Unit tests for shared parsing logic
+## UX and reliability features
 
-## Required Notion database schema
+- High-contrast, stateful button UX (`Saving`, `Saved`, `Already saved`, `Retry`)
+- Non-blocking toast feedback for success/failure
+- Robust selector strategy for dynamic X DOM updates
+- Connection diagnostics page with schema health checks
+- Optional schema warnings (missing/mismatched optional fields)
 
-Create a Notion database with these property names and types:
+## Notion schema requirements
+
+### Required (must exist with exact type)
 
 - `Title` (title)
 - `Post URL` (url)
+- `Saved At` (date)
+
+### Optional (recommended)
+
 - `Author` (rich_text)
 - `Content` (rich_text)
 - `Posted At` (date)
-- `Saved At` (date)
 - `Source` (select)
+
+## Security model
+
+- `notionToken` is stored in `chrome.storage.local` only (not synced).
+- `notionDatabaseId` and `enabledOnX` are stored in `chrome.storage.sync`.
 
 ## Setup
 
-1. Create a Notion **internal integration** and copy its secret token.
-2. Share your target database with that integration in Notion.
-3. Load extension:
-   - Open `chrome://extensions`
-   - Enable **Developer mode**
-   - Click **Load unpacked**
-   - Select this project folder
-4. Open extension options and enter:
-   - Integration token
-   - Database ID
-5. Click **Test connection**.
+1. Create a Notion internal integration and copy its token.
+2. Share your target Notion database with that integration.
+3. Open `chrome://extensions`, enable Developer mode, then click `Load unpacked`.
+4. Select this repository folder.
+5. Open extension options:
+   - Paste token
+   - Paste database ID or full Notion database URL
+   - Click `Save Settings`
+   - Click `Test Connection`
 
-## Development
+## Local development
 
-Run tests:
+Run test suite:
 
 ```bash
 npm test
 ```
 
-No build step is required for this MVP.
+No build step is required for this codebase.
+
+## Chrome Web Store package resources
+
+Prepared store artifacts are in:
+- `docs/chrome-web-store/listing-copy.md`
+- `docs/chrome-web-store/privacy-policy.md`
+- `docs/chrome-web-store/permission-rationale.md`
+- `docs/chrome-web-store/submission-checklist.md`
+
+Extension icons are in:
+- `assets/icons/icon16.png`
+- `assets/icons/icon32.png`
+- `assets/icons/icon48.png`
+- `assets/icons/icon128.png`

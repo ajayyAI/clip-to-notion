@@ -7,69 +7,113 @@
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <main class="page">
-      <section class="panel">
-        <h1>X to Notion Idea Saver</h1>
-        <p class="subtitle">Connect Notion once, then save posts from x.com in one click.</p>
+    <main class="shell">
+      <section class="hero-card">
+        <p class="eyebrow">X to Notion</p>
+        <h1>Capture viral post ideas in one click.</h1>
+        <p class="subtitle">
+          Connect your Notion database once. Then every strong X post idea can be saved with high signal metadata.
+        </p>
+      </section>
 
-        <ol class="setup-steps">
-          <li>Create a Notion internal integration and copy its secret token.</li>
-          <li>Create a database with the required properties listed below.</li>
-          <li>Share that database with your integration in Notion.</li>
-        </ol>
+      <section class="layout-grid">
+        <article class="card setup-card">
+          <header class="card-head">
+            <h2>Connection Setup</h2>
+            <p>Secure local token storage. Schema check before first save.</p>
+          </header>
 
-        <form id="settingsForm">
-          <label class="field">
-            <span>Notion integration token</span>
-            <input
-              id="notionToken"
-              name="notionToken"
-              type="password"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="secret_..."
-              required
-            />
-          </label>
+          <ol class="setup-steps">
+            <li>Create a Notion internal integration and copy its secret token.</li>
+            <li>Create a database and include the required properties listed below.</li>
+            <li>Share that database with your integration in Notion.</li>
+          </ol>
 
-          <label class="field">
-            <span>Notion database ID</span>
-            <input
-              id="notionDatabaseId"
-              name="notionDatabaseId"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="e.g. 12345678-1234-1234-1234-123456789abc"
-              required
-            />
-          </label>
+          <form id="settingsForm" novalidate>
+            <label class="field">
+              <span class="label-row">
+                <span>Notion integration token</span>
+                <button type="button" id="toggleTokenVisibility" class="inline-control">Show</button>
+              </span>
+              <input
+                id="notionToken"
+                name="notionToken"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="secret_..."
+                required
+              />
+              <small>Stored in <code>chrome.storage.local</code> only.</small>
+            </label>
 
-          <label class="checkbox">
-            <input id="enabledOnX" name="enabledOnX" type="checkbox" checked />
-            <span>Enable save button on x.com</span>
-          </label>
+            <label class="field">
+              <span>Notion database ID (or URL)</span>
+              <input
+                id="notionDatabaseId"
+                name="notionDatabaseId"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="12345678-1234-1234-1234-123456789abc"
+                required
+              />
+              <small>Paste the database URL and it will be normalized automatically.</small>
+            </label>
 
-          <div class="actions">
-            <button type="button" id="testConnectionButton" class="ghost">Test connection</button>
-            <button type="submit" id="saveButton">Save settings</button>
+            <label class="switch">
+              <input id="enabledOnX" name="enabledOnX" type="checkbox" checked />
+              <span>Enable save button injection on x.com</span>
+            </label>
+
+            <div class="actions">
+              <button type="button" id="testConnectionButton" class="ghost">Test Connection</button>
+              <button type="submit" id="saveButton">Save Settings</button>
+            </div>
+          </form>
+        </article>
+
+        <aside class="card diagnostics-card">
+          <header class="card-head">
+            <h2>Connection Health</h2>
+            <p>Realtime validation for schema safety and write readiness.</p>
+          </header>
+
+          <div class="badge-row">
+            <span class="badge" id="connectionBadge" data-tone="neutral">Not tested</span>
+            <span class="badge" id="schemaBadge" data-tone="neutral">Schema unknown</span>
           </div>
-        </form>
 
-        <p id="statusMessage" class="status" aria-live="polite"></p>
+          <p id="statusMessage" class="status" data-tone="neutral" aria-live="polite">
+            Save your settings, then run a connection test.
+          </p>
 
-        <details class="requirements">
-          <summary>Required Notion database properties</summary>
-          <ul>
-            <li><code>Title</code> (title)</li>
-            <li><code>Post URL</code> (url)</li>
-            <li><code>Author</code> (rich_text)</li>
-            <li><code>Content</code> (rich_text)</li>
-            <li><code>Posted At</code> (date)</li>
-            <li><code>Saved At</code> (date)</li>
-            <li><code>Source</code> (select)</li>
-          </ul>
-        </details>
+          <section class="diagnostic-group">
+            <h3>Missing Properties</h3>
+            <ul id="missingList" class="chip-list"></ul>
+          </section>
+
+          <section class="diagnostic-group">
+            <h3>Type Mismatches</h3>
+            <ul id="mismatchList" class="chip-list"></ul>
+          </section>
+        </aside>
+      </section>
+
+      <section class="card schema-card">
+        <header class="card-head">
+          <h2>Required Notion Properties</h2>
+          <p>Names and types are case-sensitive. Required fields must match exactly.</p>
+        </header>
+        <div class="schema-grid">
+          <div class="schema-item"><code>Title</code><span>title</span></div>
+          <div class="schema-item"><code>Post URL</code><span>url</span></div>
+          <div class="schema-item"><code>Saved At</code><span>date</span></div>
+          <div class="schema-item"><code>Author</code><span>rich_text (optional)</span></div>
+          <div class="schema-item"><code>Content</code><span>rich_text (optional)</span></div>
+          <div class="schema-item"><code>Posted At</code><span>date (optional)</span></div>
+          <div class="schema-item"><code>Source</code><span>select (optional)</span></div>
+        </div>
       </section>
     </main>
 

@@ -2,30 +2,24 @@ importScripts("shared-core.js");
 
 const CORE = self.X2NotionCore;
 
-const DEFAULT_SETTINGS = {
-  [CORE.STORAGE_KEYS.notionToken]: "",
+const DEFAULT_SYNC_SETTINGS = {
   [CORE.STORAGE_KEYS.notionDatabaseId]: "",
   [CORE.STORAGE_KEYS.enabledOnX]: true
 };
 
-const REQUIRED_DATABASE_PROPERTIES = [
-  "Title",
-  "Post URL",
-  "Author",
-  "Content",
-  "Posted At",
-  "Saved At",
-  "Source"
-];
+const DEFAULT_LOCAL_SETTINGS = {
+  [CORE.STORAGE_KEYS.notionToken]: ""
+};
+
+const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_NOTION_RETRIES = 2;
+const NOTION_REQUEST_TIMEOUT_MS = 12000;
+
+const inFlightSaves = new Map();
+const databaseCache = new Map();
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  const normalizedDatabaseId = CORE.normalizeDatabaseId(existing[CORE.STORAGE_KEYS.notionDatabaseId]) || "";
-  await chrome.storage.sync.set({
-    ...DEFAULT_SETTINGS,
-    ...existing,
-    [CORE.STORAGE_KEYS.notionDatabaseId]: normalizedDatabaseId
-  });
+  await migrateAndNormalizeSettings();
 });
 
 chrome.action.onClicked.addListener(() => {
@@ -35,14 +29,7 @@ chrome.action.onClicked.addListener(() => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message)
     .then((result) => sendResponse(result))
-    .catch((error) =>
-      sendResponse({
-        status: "error",
-        code: "UNEXPECTED",
-        message: error instanceof Error ? error.message : "Unexpected error"
-      })
-    );
-
+    .catch((error) => sendResponse(normalizeError(error)));
   return true;
 });
 
@@ -53,10 +40,7 @@ async function handleMessage(message) {
     case "TEST_CONNECTION":
       return handleTestConnection(message.payload);
     case "GET_SETTINGS":
-      return {
-        status: "ok",
-        settings: await getSettings()
-      };
+      return { status: "ok", settings: await getSettings() };
     case "OPEN_OPTIONS":
       await chrome.runtime.openOptionsPage();
       return { status: "ok" };
@@ -69,17 +53,48 @@ async function handleMessage(message) {
   }
 }
 
+async function migrateAndNormalizeSettings() {
+  const syncSettings = await chrome.storage.sync.get({
+    ...DEFAULT_SYNC_SETTINGS,
+    [CORE.STORAGE_KEYS.notionToken]: ""
+  });
+  const localSettings = await chrome.storage.local.get(DEFAULT_LOCAL_SETTINGS);
+
+  const normalizedDatabaseId = CORE.normalizeDatabaseId(syncSettings[CORE.STORAGE_KEYS.notionDatabaseId]) || "";
+  const syncToken = (syncSettings[CORE.STORAGE_KEYS.notionToken] || "").trim();
+  const localToken = (localSettings[CORE.STORAGE_KEYS.notionToken] || "").trim();
+
+  await chrome.storage.sync.set({
+    [CORE.STORAGE_KEYS.notionDatabaseId]: normalizedDatabaseId,
+    [CORE.STORAGE_KEYS.enabledOnX]: syncSettings[CORE.STORAGE_KEYS.enabledOnX] !== false
+  });
+
+  if (syncToken && !localToken) {
+    await chrome.storage.local.set({
+      [CORE.STORAGE_KEYS.notionToken]: syncToken
+    });
+  }
+
+  if (syncToken) {
+    await chrome.storage.sync.remove(CORE.STORAGE_KEYS.notionToken);
+  }
+}
+
 async function getSettings() {
-  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const [syncSettings, localSettings] = await Promise.all([
+    chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS),
+    chrome.storage.local.get(DEFAULT_LOCAL_SETTINGS)
+  ]);
+
   return {
-    [CORE.STORAGE_KEYS.notionToken]: settings[CORE.STORAGE_KEYS.notionToken] || "",
-    [CORE.STORAGE_KEYS.notionDatabaseId]: CORE.normalizeDatabaseId(settings[CORE.STORAGE_KEYS.notionDatabaseId]) || "",
-    [CORE.STORAGE_KEYS.enabledOnX]: settings[CORE.STORAGE_KEYS.enabledOnX] !== false
+    [CORE.STORAGE_KEYS.notionToken]: (localSettings[CORE.STORAGE_KEYS.notionToken] || "").trim(),
+    [CORE.STORAGE_KEYS.notionDatabaseId]: CORE.normalizeDatabaseId(syncSettings[CORE.STORAGE_KEYS.notionDatabaseId]) || "",
+    [CORE.STORAGE_KEYS.enabledOnX]: syncSettings[CORE.STORAGE_KEYS.enabledOnX] !== false
   };
 }
 
 function validateConfiguration(settings) {
-  const notionToken = settings[CORE.STORAGE_KEYS.notionToken].trim();
+  const notionToken = (settings[CORE.STORAGE_KEYS.notionToken] || "").trim();
   const notionDatabaseId = CORE.normalizeDatabaseId(settings[CORE.STORAGE_KEYS.notionDatabaseId]);
 
   if (!CORE.isLikelyNotionToken(notionToken) || !notionDatabaseId) {
@@ -100,7 +115,8 @@ function validateConfiguration(settings) {
 
 function validateIncomingPost(post) {
   const postUrl = CORE.normalizePostUrl(post?.postUrl || "");
-  if (!postUrl) {
+  const statusId = CORE.extractStatusIdFromPostUrl(postUrl || "");
+  if (!postUrl || !statusId) {
     return {
       ok: false,
       status: "error",
@@ -109,10 +125,14 @@ function validateIncomingPost(post) {
     };
   }
 
+  const authorHandle = CORE.normalizeWhitespace(post?.authorHandle || "");
+  const authorFromUrl = CORE.extractHandleFromPostUrl(postUrl) || "";
+
   return {
     ok: true,
+    postId: statusId,
     postUrl,
-    authorHandle: CORE.normalizeWhitespace(post?.authorHandle || ""),
+    authorHandle: authorHandle || authorFromUrl,
     authorName: CORE.normalizeWhitespace(post?.authorName || ""),
     text: CORE.normalizeWhitespace(post?.text || ""),
     postedAt: CORE.normalizeISODate(post?.postedAt || ""),
@@ -121,10 +141,10 @@ function validateIncomingPost(post) {
 }
 
 async function handleTestConnection(payload) {
-  const settings = await getSettings();
-  const notionToken = (payload?.notionToken || settings[CORE.STORAGE_KEYS.notionToken] || "").trim();
+  const current = await getSettings();
+  const notionToken = (payload?.notionToken || current[CORE.STORAGE_KEYS.notionToken] || "").trim();
   const notionDatabaseId = CORE.normalizeDatabaseId(
-    payload?.notionDatabaseId || settings[CORE.STORAGE_KEYS.notionDatabaseId] || ""
+    payload?.notionDatabaseId || current[CORE.STORAGE_KEYS.notionDatabaseId] || ""
   );
 
   if (!CORE.isLikelyNotionToken(notionToken) || !notionDatabaseId) {
@@ -135,23 +155,15 @@ async function handleTestConnection(payload) {
     };
   }
 
-  try {
-    const database = await notionFetch(`/databases/${notionDatabaseId}`, { method: "GET" }, notionToken);
-    const databaseTitle = Array.isArray(database.title)
-      ? database.title.map((part) => part.plain_text || "").join("").trim()
-      : "";
-    const missingProperties = REQUIRED_DATABASE_PROPERTIES.filter(
-      (propertyName) => !Object.prototype.hasOwnProperty.call(database.properties || {}, propertyName)
-    );
+  const database = await getDatabaseDefinition(notionToken, notionDatabaseId, true);
+  const databaseTitle = getDatabaseTitle(database);
+  const schemaCheck = CORE.evaluateDatabaseSchema(database.properties);
 
-    return {
-      status: "ok",
-      databaseTitle: databaseTitle || "Untitled database",
-      missingProperties
-    };
-  } catch (error) {
-    return normalizeNotionError(error);
-  }
+  return {
+    status: "ok",
+    databaseTitle: databaseTitle || "Untitled database",
+    ...schemaCheck
+  };
 }
 
 async function handleSavePost(postPayload) {
@@ -166,23 +178,85 @@ async function handleSavePost(postPayload) {
     return post;
   }
 
-  try {
-    const existing = await findExistingByPostUrl(config.notionToken, config.notionDatabaseId, post.postUrl);
-    if (existing) {
-      return {
-        status: "already_saved",
-        notionPageId: existing.id || null
-      };
-    }
-
-    const created = await createPostPage(config.notionToken, config.notionDatabaseId, post);
-    return {
-      status: "saved",
-      notionPageId: created.id
-    };
-  } catch (error) {
-    return normalizeNotionError(error);
+  const operationKey = `${config.notionDatabaseId}:${post.postId}`;
+  if (inFlightSaves.has(operationKey)) {
+    return inFlightSaves.get(operationKey);
   }
+
+  const promise = performSavePost(config, post).finally(() => {
+    inFlightSaves.delete(operationKey);
+  });
+
+  inFlightSaves.set(operationKey, promise);
+  return promise;
+}
+
+async function performSavePost(config, post) {
+  const database = await getDatabaseDefinition(config.notionToken, config.notionDatabaseId, false);
+  const schemaCheck = CORE.evaluateDatabaseSchema(database.properties);
+  if (!schemaCheck.isWriteSafe) {
+    return {
+      status: "error",
+      code: "SCHEMA_INVALID",
+      message: buildSchemaGuidance(schemaCheck)
+    };
+  }
+
+  const existing = await findExistingByPostUrl(config.notionToken, config.notionDatabaseId, post.postUrl);
+  if (existing) {
+    return {
+      status: "already_saved",
+      notionPageId: existing.id || null
+    };
+  }
+
+  const created = await createPostPage(config.notionToken, config.notionDatabaseId, post, database.properties);
+  return {
+    status: "saved",
+    notionPageId: created.id
+  };
+}
+
+async function getDatabaseDefinition(notionToken, databaseId, forceRefresh) {
+  const cacheKey = `${databaseId}:${notionToken.slice(-8)}`;
+  const cached = databaseCache.get(cacheKey);
+  const now = Date.now();
+
+  if (!forceRefresh && cached && now - cached.timestamp < SCHEMA_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  const database = await notionFetch(`/databases/${databaseId}`, { method: "GET" }, notionToken);
+  databaseCache.set(cacheKey, {
+    timestamp: now,
+    value: database
+  });
+  return database;
+}
+
+function getDatabaseTitle(database) {
+  if (!Array.isArray(database?.title)) {
+    return "";
+  }
+  return database.title.map((part) => part?.plain_text || "").join("").trim();
+}
+
+function buildSchemaGuidance(schemaCheck) {
+  const requiredMissing = schemaCheck.missingRequired.join(", ");
+  const requiredMismatch = schemaCheck.mismatchedRequired
+    .map((item) => `${item.name} (${item.actual} -> ${item.expected})`)
+    .join(", ");
+
+  if (requiredMissing && requiredMismatch) {
+    return `Notion schema invalid. Missing: ${requiredMissing}. Type fixes: ${requiredMismatch}.`;
+  }
+  if (requiredMissing) {
+    return `Notion schema invalid. Missing required properties: ${requiredMissing}.`;
+  }
+  if (requiredMismatch) {
+    return `Notion schema invalid. Fix property types: ${requiredMismatch}.`;
+  }
+  return "Notion schema invalid. Please verify required property names and types.";
 }
 
 async function findExistingByPostUrl(notionToken, databaseId, postUrl) {
@@ -206,14 +280,16 @@ async function findExistingByPostUrl(notionToken, databaseId, postUrl) {
   if (!Array.isArray(response.results) || response.results.length === 0) {
     return null;
   }
+
   return response.results[0];
 }
 
-async function createPostPage(notionToken, databaseId, post) {
+async function createPostPage(notionToken, databaseId, post, databaseProperties) {
+  const properties = {};
   const authorLabel = CORE.buildAuthorLabel(post.authorHandle, post.authorName);
 
-  const properties = {
-    Title: {
+  if (databaseProperties.Title?.type === "title") {
+    properties.Title = {
       title: [
         {
           text: {
@@ -221,23 +297,22 @@ async function createPostPage(notionToken, databaseId, post) {
           }
         }
       ]
-    },
-    "Post URL": {
-      url: post.postUrl
-    },
-    "Saved At": {
+    };
+  }
+
+  if (databaseProperties["Post URL"]?.type === "url") {
+    properties["Post URL"] = { url: post.postUrl };
+  }
+
+  if (databaseProperties["Saved At"]?.type === "date") {
+    properties["Saved At"] = {
       date: {
         start: post.savedAt
       }
-    },
-    Source: {
-      select: {
-        name: "X"
-      }
-    }
-  };
+    };
+  }
 
-  if (authorLabel) {
+  if (authorLabel && databaseProperties.Author?.type === "rich_text") {
     properties.Author = {
       rich_text: [
         {
@@ -249,7 +324,7 @@ async function createPostPage(notionToken, databaseId, post) {
     };
   }
 
-  if (post.text) {
+  if (post.text && databaseProperties.Content?.type === "rich_text") {
     properties.Content = {
       rich_text: [
         {
@@ -261,10 +336,18 @@ async function createPostPage(notionToken, databaseId, post) {
     };
   }
 
-  if (post.postedAt) {
+  if (post.postedAt && databaseProperties["Posted At"]?.type === "date") {
     properties["Posted At"] = {
       date: {
         start: post.postedAt
+      }
+    };
+  }
+
+  if (databaseProperties.Source?.type === "select") {
+    properties.Source = {
+      select: {
+        name: "X"
       }
     };
   }
@@ -286,24 +369,28 @@ async function createPostPage(notionToken, databaseId, post) {
 
 async function notionFetch(path, requestOptions, notionToken, attempt) {
   const retryCount = attempt || 0;
-  const response = await fetch(`${CORE.NOTION_API_BASE}${path}`, {
-    method: requestOptions.method,
-    headers: {
-      Authorization: `Bearer ${notionToken}`,
-      "Notion-Version": CORE.NOTION_VERSION,
-      "Content-Type": "application/json"
-    },
-    body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined
-  });
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), NOTION_REQUEST_TIMEOUT_MS);
 
-  let payload = null;
+  let response;
   try {
-    payload = await response.json();
-  } catch (_error) {
-    payload = null;
+    response = await fetch(`${CORE.NOTION_API_BASE}${path}`, {
+      method: requestOptions.method,
+      headers: {
+        Authorization: `Bearer ${notionToken}`,
+        "Notion-Version": CORE.NOTION_VERSION,
+        "Content-Type": "application/json"
+      },
+      body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
+      signal: abortController.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  if (response.status === 429 && retryCount < 1) {
+  const payload = await safeReadJson(response);
+
+  if (response.status === 429 && retryCount < MAX_NOTION_RETRIES) {
     const retryAfterHeader = Number(response.headers.get("retry-after"));
     const waitMs = Number.isFinite(retryAfterHeader) ? retryAfterHeader * 1000 : 900;
     await delay(waitMs);
@@ -311,18 +398,47 @@ async function notionFetch(path, requestOptions, notionToken, attempt) {
   }
 
   if (!response.ok) {
-    const error = new Error(payload?.message || "Notion request failed.");
-    error.name = "NotionApiError";
-    error.status = response.status;
-    error.notionCode = payload?.code || null;
-    throw error;
+    throw {
+      name: "NotionApiError",
+      status: response.status,
+      notionCode: payload?.code || "",
+      message: payload?.message || "Notion request failed."
+    };
   }
 
-  return payload;
+  return payload || {};
 }
 
-function normalizeNotionError(error) {
+async function safeReadJson(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
+  try {
+    return await response.json();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function normalizeError(error) {
+  if (error?.name === "AbortError") {
+    return {
+      status: "error",
+      code: "REQUEST_TIMEOUT",
+      message: "Request timed out. Please try again."
+    };
+  }
+
   if (error?.name === "NotionApiError") {
+    if (error.status === 400) {
+      return {
+        status: "error",
+        code: "NOTION_BAD_REQUEST",
+        message: error.message || "Notion rejected this request. Check database schema."
+      };
+    }
     if (error.status === 401) {
       return {
         status: "error",
@@ -348,7 +464,7 @@ function normalizeNotionError(error) {
       return {
         status: "error",
         code: "NOTION_RATE_LIMITED",
-        message: "Notion is rate limiting requests. Please retry in a moment."
+        message: "Notion rate limit reached. Please retry in a moment."
       };
     }
     return {
@@ -358,10 +474,22 @@ function normalizeNotionError(error) {
     };
   }
 
+  if (error instanceof TypeError) {
+    return {
+      status: "error",
+      code: "NETWORK_ERROR",
+      message: "Network error while contacting Notion."
+    };
+  }
+
+  if (error && typeof error === "object" && error.status && error.code && error.message) {
+    return error;
+  }
+
   return {
     status: "error",
-    code: "NETWORK_OR_UNKNOWN",
-    message: error instanceof Error ? error.message : "Request failed unexpectedly."
+    code: "UNEXPECTED",
+    message: error instanceof Error ? error.message : "Unexpected error."
   };
 }
 

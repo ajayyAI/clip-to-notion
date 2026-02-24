@@ -17,15 +17,26 @@
     statusLink: 'a[href*="/status/"]'
   };
 
-  let scanTimer = null;
+  const STATE_RESET_MS = 5000;
+
+  const articleByButton = new WeakMap();
+  const stateByPostId = new Map();
+  const pendingArticles = new Set();
+
   let extensionEnabled = true;
+  let flushTimer = null;
 
   bootstrapSettings();
-  observeDomChanges();
+  observeChanges();
+  queueAllArticles();
 
-  function observeDomChanges() {
-    const observer = new MutationObserver(() => {
-      scheduleScan();
+  function observeChanges() {
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          queueArticlesFromNode(node);
+        }
+      }
     });
 
     observer.observe(document.documentElement, {
@@ -33,34 +44,59 @@
       subtree: true
     });
 
-    window.addEventListener("popstate", scheduleScan);
+    window.addEventListener("popstate", queueAllArticles);
   }
 
-  function scheduleScan() {
+  function queueArticlesFromNode(node) {
+    if (!(node instanceof Element)) {
+      return;
+    }
+
+    if (node.matches(SELECTORS.article)) {
+      pendingArticles.add(node);
+    }
+
+    const nestedArticles = node.querySelectorAll(SELECTORS.article);
+    for (const article of nestedArticles) {
+      pendingArticles.add(article);
+    }
+
+    scheduleFlush();
+  }
+
+  function queueAllArticles() {
     if (!extensionEnabled) {
       return;
     }
-    if (scanTimer) {
-      window.clearTimeout(scanTimer);
-    }
-    scanTimer = window.setTimeout(scanForPosts, 180);
-  }
-
-  function scanForPosts() {
     const articles = document.querySelectorAll(SELECTORS.article);
     for (const article of articles) {
-      injectButton(article);
+      pendingArticles.add(article);
     }
+    scheduleFlush();
   }
 
-  function injectButton(article) {
+  function scheduleFlush() {
+    if (flushTimer) {
+      window.clearTimeout(flushTimer);
+    }
+    flushTimer = window.setTimeout(flushPendingArticles, 120);
+  }
+
+  function flushPendingArticles() {
+    flushTimer = null;
     if (!extensionEnabled) {
+      pendingArticles.clear();
       return;
     }
+
+    for (const article of pendingArticles) {
+      injectOrUpdateButton(article);
+    }
+    pendingArticles.clear();
+  }
+
+  function injectOrUpdateButton(article) {
     if (!(article instanceof HTMLElement)) {
-      return;
-    }
-    if (article.querySelector(".x2n-save-wrap")) {
       return;
     }
 
@@ -69,62 +105,103 @@
       return;
     }
 
-    const postData = extractPostData(article);
-    if (!postData || !postData.postUrl) {
+    const payload = extractPostData(article);
+    if (!payload || !payload.postUrl) {
       return;
     }
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "x2n-save-wrap";
+    let wrapper = article.querySelector(".x2n-save-wrap");
+    let button;
+    if (!wrapper) {
+      wrapper = document.createElement("div");
+      wrapper.className = "x2n-save-wrap";
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "x2n-save-button";
-    button.textContent = "Save to Notion";
-    button.setAttribute("aria-label", "Save post to Notion");
-    button.dataset.state = "idle";
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "x2n-save-button";
+      button.dataset.state = "idle";
+      button.setAttribute("aria-label", "Save post idea to Notion");
+      button.innerHTML =
+        '<span class="x2n-save-icon" aria-hidden="true">+</span><span class="x2n-save-label">Save idea</span>';
 
-    wrapper.appendChild(button);
-    actionGroup.appendChild(wrapper);
+      wrapper.appendChild(button);
+      actionGroup.appendChild(wrapper);
+      articleByButton.set(button, article);
 
-    button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      await saveCurrentPost(article, button);
-    });
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await saveArticle(button);
+      });
+    } else {
+      button = wrapper.querySelector(".x2n-save-button");
+      if (!button) {
+        return;
+      }
+    }
+
+    articleByButton.set(button, article);
+    button.dataset.postId = payload.postId;
+    applyCachedState(button, payload.postId);
   }
 
-  async function saveCurrentPost(article, button) {
-    const postData = extractPostData(article);
-    if (!postData || !postData.postUrl) {
-      showToast("Could not parse this post.", "error");
-      setButtonState(button, "error", "Parse failed");
+  function applyCachedState(button, postId) {
+    const cached = stateByPostId.get(postId);
+    if (!cached) {
+      setButtonState(button, "idle", "Save idea");
+      return;
+    }
+    if (cached.expiresAt < Date.now()) {
+      stateByPostId.delete(postId);
+      setButtonState(button, "idle", "Save idea");
+      return;
+    }
+    setButtonState(button, cached.state, cached.label);
+  }
+
+  async function saveArticle(button) {
+    if (button.dataset.state === "saving") {
       return;
     }
 
-    setButtonState(button, "saving", "Saving...");
+    const article = articleByButton.get(button);
+    if (!article) {
+      return;
+    }
+
+    const payload = extractPostData(article);
+    if (!payload || !payload.postUrl) {
+      setButtonState(button, "error", "Parse failed");
+      showToast("Could not parse this post.", "error");
+      return;
+    }
+
+    setButtonState(button, "saving", "Saving");
 
     try {
       const response = await sendRuntimeMessage({
         type: "SAVE_POST",
-        payload: postData
+        payload
       });
 
       if (response?.status === "saved") {
+        cachePostState(payload.postId, "saved", "Saved");
         setButtonState(button, "saved", "Saved");
+        scheduleStateReset(button, payload.postId);
         showToast("Saved to Notion.", "success");
         return;
       }
 
       if (response?.status === "already_saved") {
+        cachePostState(payload.postId, "already", "Already saved");
         setButtonState(button, "already", "Already saved");
-        showToast("Post already exists in Notion.", "info");
+        scheduleStateReset(button, payload.postId);
+        showToast("Already in your Notion database.", "info");
         return;
       }
 
-      const message = response?.message || "Could not save this post.";
-      setButtonState(button, "error", "Error");
-      showToast(message, "error");
+      setButtonState(button, "error", "Retry");
+      showToast(response?.message || "Could not save this post.", "error");
 
       if (response?.code === "NOT_CONFIGURED") {
         await sendRuntimeMessage({ type: "OPEN_OPTIONS" }).catch(() => {
@@ -132,27 +209,46 @@
         });
       }
     } catch (error) {
-      setButtonState(button, "error", "Error");
-      showToast(error instanceof Error ? error.message : "Unexpected error", "error");
+      setButtonState(button, "error", "Retry");
+      showToast(error instanceof Error ? error.message : "Unexpected error.", "error");
     }
   }
 
+  function cachePostState(postId, state, label) {
+    stateByPostId.set(postId, {
+      state,
+      label,
+      expiresAt: Date.now() + STATE_RESET_MS
+    });
+  }
+
+  function scheduleStateReset(button, postId) {
+    window.setTimeout(() => {
+      const current = stateByPostId.get(postId);
+      if (!current || current.expiresAt > Date.now()) {
+        return;
+      }
+      stateByPostId.delete(postId);
+      if (button.dataset.postId === postId && button.dataset.state !== "saving") {
+        setButtonState(button, "idle", "Save idea");
+      }
+    }, STATE_RESET_MS + 40);
+  }
+
   function extractPostData(article) {
-    const rawUrl = findCanonicalStatusUrl(article);
-    const postUrl = CORE.normalizePostUrl(rawUrl || "");
-    if (!postUrl) {
+    const postUrl = CORE.normalizePostUrl(findCanonicalStatusUrl(article) || "");
+    const postId = CORE.extractStatusIdFromPostUrl(postUrl || "");
+    if (!postUrl || !postId) {
       return null;
     }
 
-    const handleFromUrl = CORE.extractHandleFromPostUrl(postUrl) || "";
-    const authorHandle = extractAuthorHandle(article) || handleFromUrl;
+    const authorHandle = extractAuthorHandle(article) || CORE.extractHandleFromPostUrl(postUrl) || "";
     const authorName = extractAuthorName(article);
-    const textNode = article.querySelector(SELECTORS.text);
-    const text = CORE.normalizeWhitespace(textNode ? textNode.innerText : "");
-    const timeNode = article.querySelector("time");
-    const postedAt = CORE.normalizeISODate(timeNode ? timeNode.getAttribute("datetime") : "");
+    const text = extractPrimaryPostText(article);
+    const postedAt = CORE.normalizeISODate(extractPostDatetime(article) || "");
 
     return {
+      postId,
       postUrl,
       authorHandle,
       authorName,
@@ -163,11 +259,14 @@
   }
 
   function findCanonicalStatusUrl(article) {
-    const timeNode = article.querySelector("time");
-    if (timeNode) {
-      const timeLink = timeNode.closest('a[href*="/status/"]');
-      if (timeLink && typeof timeLink.href === "string") {
-        return timeLink.href;
+    const timeLinkCandidates = article.querySelectorAll('a[href*="/status/"] time');
+    for (const timeElement of timeLinkCandidates) {
+      const link = timeElement.closest('a[href*="/status/"]');
+      if (link instanceof HTMLAnchorElement && link.closest(SELECTORS.article) === article) {
+        const normalized = CORE.normalizePostUrl(link.href);
+        if (normalized) {
+          return normalized;
+        }
       }
     }
 
@@ -176,12 +275,53 @@
       if (!(link instanceof HTMLAnchorElement)) {
         continue;
       }
-      if (CORE.normalizePostUrl(link.href)) {
-        return link.href;
+      const href = link.href || link.getAttribute("href") || "";
+      const normalized = CORE.normalizePostUrl(href);
+      if (normalized) {
+        return normalized;
       }
     }
 
     return null;
+  }
+
+  function extractPostDatetime(article) {
+    const timeElement = article.querySelector("time");
+    if (!(timeElement instanceof HTMLTimeElement)) {
+      return "";
+    }
+    return timeElement.getAttribute("datetime") || "";
+  }
+
+  function extractPrimaryPostText(article) {
+    const textNodes = Array.from(article.querySelectorAll(SELECTORS.text));
+    if (textNodes.length === 0) {
+      return "";
+    }
+
+    let bestNode = textNodes[0];
+    let bestDepth = depthFromAncestor(article, bestNode);
+
+    for (let index = 1; index < textNodes.length; index += 1) {
+      const candidate = textNodes[index];
+      const depth = depthFromAncestor(article, candidate);
+      if (depth < bestDepth) {
+        bestNode = candidate;
+        bestDepth = depth;
+      }
+    }
+
+    return CORE.normalizeWhitespace(bestNode.innerText || "");
+  }
+
+  function depthFromAncestor(ancestor, node) {
+    let depth = 0;
+    let current = node;
+    while (current && current !== ancestor) {
+      depth += 1;
+      current = current.parentElement;
+    }
+    return depth;
   }
 
   function extractAuthorHandle(article) {
@@ -214,51 +354,49 @@
     const spans = userNameBlock.querySelectorAll("span");
     for (const span of spans) {
       const value = CORE.normalizeWhitespace(span.textContent || "");
-      if (!value) {
+      if (!value || value.startsWith("@")) {
         continue;
       }
-      if (!value.startsWith("@")) {
-        return value;
-      }
+      return value;
     }
     return "";
   }
 
   function setButtonState(button, state, label) {
     button.dataset.state = state;
-    button.textContent = label;
 
-    if (state === "saving") {
-      button.disabled = true;
-      return;
+    const labelNode = button.querySelector(".x2n-save-label");
+    if (labelNode) {
+      labelNode.textContent = label;
+    } else {
+      button.textContent = label;
     }
 
-    button.disabled = false;
+    button.disabled = state === "saving";
   }
 
   async function bootstrapSettings() {
     try {
       const settings = await chrome.storage.sync.get({
-        enabledOnX: true
+        [CORE.STORAGE_KEYS.enabledOnX]: true
       });
-      extensionEnabled = settings.enabledOnX !== false;
-      if (extensionEnabled) {
-        scheduleScan();
-      } else {
-        removeInjectedButtons();
-      }
+      extensionEnabled = settings[CORE.STORAGE_KEYS.enabledOnX] !== false;
     } catch (_error) {
       extensionEnabled = true;
-      scheduleScan();
+    }
+
+    if (!extensionEnabled) {
+      removeInjectedButtons();
     }
 
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "sync" || !changes.enabledOnX) {
+      if (area !== "sync" || !changes[CORE.STORAGE_KEYS.enabledOnX]) {
         return;
       }
-      extensionEnabled = changes.enabledOnX.newValue !== false;
+
+      extensionEnabled = changes[CORE.STORAGE_KEYS.enabledOnX].newValue !== false;
       if (extensionEnabled) {
-        scheduleScan();
+        queueAllArticles();
       } else {
         removeInjectedButtons();
       }
@@ -270,6 +408,7 @@
     for (const wrapper of wrappers) {
       wrapper.remove();
     }
+    pendingArticles.clear();
   }
 
   function showToast(message, tone) {
@@ -281,6 +420,7 @@
     const toast = document.createElement("div");
     toast.className = "x2n-toast";
     toast.dataset.tone = tone || "info";
+    toast.setAttribute("role", "status");
     toast.textContent = message;
     document.body.appendChild(toast);
 
@@ -291,7 +431,7 @@
     window.setTimeout(() => {
       toast.classList.remove("visible");
       window.setTimeout(() => toast.remove(), 220);
-    }, 1900);
+    }, 2300);
   }
 
   function sendRuntimeMessage(payload) {

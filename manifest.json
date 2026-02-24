@@ -3,6 +3,12 @@
   "name": "X to Notion Idea Saver",
   "version": "0.1.0",
   "description": "Save X posts to a Notion database with one click.",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
   "permissions": ["storage"],
   "host_permissions": ["https://x.com/*", "https://api.notion.com/*"],
   "background": {
@@ -17,7 +23,11 @@
     }
   ],
   "action": {
-    "default_title": "X to Notion Idea Saver"
+    "default_title": "X to Notion Idea Saver",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png"
+    }
   },
   "options_page": "src/options.html"
 }

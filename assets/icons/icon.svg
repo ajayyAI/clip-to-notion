@@ -1,0 +1,29 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="X to Notion Idea Saver">
+  <defs>
+    <linearGradient id="bg" x1="40" y1="36" x2="468" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#163066"/>
+      <stop offset="0.55" stop-color="#1E57B4"/>
+      <stop offset="1" stop-color="#2A80E8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(396 116) rotate(132) scale(260)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8ED7FF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#8ED7FF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="512" height="512" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#glow)"/>
+
+  <g filter="url(#shadow)">
+    <path d="M110 132H178L246 232L326 132H392L279 272L399 380H330L254 274L176 380H110L227 232L110 132Z" fill="#F6FAFF"/>
+
+    <g>
+      <rect x="284" y="286" width="154" height="154" rx="32" fill="#FFFFFF"/>
+      <rect x="300" y="302" width="122" height="122" rx="22" fill="#111827"/>
+      <path d="M330 392V334H348L374 368V334H392V392H374L348 358V392H330Z" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>
