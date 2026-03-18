@@ -1,72 +1,103 @@
 # X to Notion Idea Saver
 
-Production-grade Chrome extension (Manifest V3) for capturing X post ideas directly into Notion.
+Chrome extension for saving X posts into a Notion database.
 
-## Core behavior
+It injects a `Save idea` button into posts on `x.com`, writes the post URL to Notion, and avoids duplicate entries by checking the database before creating a new page.
 
-- Injects a resilient `Save idea` action onto X posts
-- Saves only key post details to Notion with one click
-- Prevents duplicates by canonical post URL
-- Handles repeated rapid clicks with in-flight dedupe locks
-- Maps common Notion errors into clear UX messages
+## What it does
 
-## UX and reliability features
+- Adds a save button to posts on `x.com`
+- Saves the post into a Notion database with one click
+- Deduplicates by canonical post URL
+- Shows clear button states such as `Saving`, `Saved`, `Already saved`, and `Retry`
+- Includes an options page for configuration and connection testing
+- Validates the target Notion database schema before writes
 
-- High-contrast, stateful button UX (`Saving`, `Saved`, `Already saved`, `Retry`)
-- Non-blocking toast feedback for success/failure
-- Robust selector strategy for dynamic X DOM updates
-- Connection diagnostics page with schema health checks
-- Optional schema warnings (missing/mismatched optional fields)
+## What gets saved
 
-## Notion schema requirements
+The extension writes a minimal record to Notion:
 
-### Required (must exist with exact type)
+- `Title`: a fallback title such as `X post 1938273648273648`
+- `Post URL`: canonical `x.com` post URL
+- `Saved At`: timestamp for when the save happened
+- `Posted At`: original post timestamp, if your database includes that optional property
 
-- `Title` (title)
-- `Post URL` (url)
-- `Saved At` (date)
+It does not save full post text, media, or author metadata.
 
-### Optional (recommended)
+## Notion database schema
 
-- `Posted At` (date)
+Required properties:
 
-## Security model
+- `Title` with type `title`
+- `Post URL` with type `url`
+- `Saved At` with type `date`
 
-- `notionToken` is stored in `chrome.storage.local` only (not synced).
-- `notionDatabaseId` and `enabledOnX` are stored in `chrome.storage.sync`.
+Optional property:
+
+- `Posted At` with type `date`
+
+If a required property is missing or has the wrong type, the extension blocks saves and shows the problem in the options page.
 
 ## Setup
 
 1. Create a Notion internal integration and copy its token.
-2. Share your target Notion database with that integration.
-3. Open `chrome://extensions`, enable Developer mode, then click `Load unpacked`.
-4. Select this repository folder.
-5. Open extension options:
-   - Paste token
-   - Paste database ID or full Notion database URL
-   - Click `Save Settings`
-   - Click `Test Connection`
+2. Share your target database with that integration.
+3. Load the extension in Chrome:
+   `chrome://extensions` -> enable Developer mode -> `Load unpacked` -> select this repository.
+4. Open the extension options page.
+5. Paste your Notion token.
+6. Paste either the Notion database ID or the full database URL.
+7. Save settings and run `Test Connection`.
 
-## Local development
+## Development
 
-Run test suite:
+This repo has no build step. Load it directly as an unpacked extension.
+
+Run tests with:
 
 ```bash
 npm test
 ```
 
-No build step is required for this codebase.
+## Project structure
 
-## Chrome Web Store package resources
+```text
+.
+├── manifest.json
+├── src/
+│   ├── background.js
+│   ├── content.js
+│   ├── content.css
+│   ├── options.html
+│   ├── options.css
+│   ├── options.js
+│   └── shared-core.js
+├── tests/
+│   └── shared-core.test.js
+├── assets/icons/
+└── docs/chrome-web-store/
+```
 
-Prepared store artifacts are in:
-- `docs/chrome-web-store/listing-copy.md`
-- `docs/chrome-web-store/privacy-policy.md`
-- `docs/chrome-web-store/permission-rationale.md`
-- `docs/chrome-web-store/submission-checklist.md`
+Key files:
 
-Extension icons are in:
-- `assets/icons/icon16.png`
-- `assets/icons/icon32.png`
-- `assets/icons/icon48.png`
-- `assets/icons/icon128.png`
+- `src/content.js`: injects the button into the X UI and sends save requests
+- `src/background.js`: handles settings, Notion API requests, dedupe, and schema checks
+- `src/shared-core.js`: shared parsing, normalization, and schema utilities
+- `src/options.*`: extension settings UI
+
+## Permissions
+
+- `storage`: stores extension settings
+- `https://x.com/*`: reads post data from X pages where the button is injected
+- `https://api.notion.com/*`: sends requests to the Notion API
+
+The Notion token is stored in `chrome.storage.local`. The database ID and the `enabledOnX` setting are stored in `chrome.storage.sync`.
+
+## Chrome Web Store docs
+
+Store submission material lives in `docs/chrome-web-store/`:
+
+- `listing-copy.md`
+- `privacy-policy.md`
+- `permission-rationale.md`
+- `submission-checklist.md`
