@@ -2,7 +2,7 @@
 
 **Last updated:** February 24, 2026
 
-X to Notion Idea Saver is a client-side Chrome extension. It does not operate a backend service.
+Clip to Notion is a client-side Chrome extension. It does not operate a backend service.
 
 ## What this extension does
 The extension lets a user save selected X posts to the user's own Notion database.

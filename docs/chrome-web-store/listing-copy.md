@@ -1,7 +1,7 @@
 # Chrome Web Store Listing Copy
 
 ## Product Name
-X to Notion Idea Saver
+Clip to Notion
 
 ## Short Description (<= 132 chars)
 Save high-signal X posts to your Notion ideas database in one click, with duplicate protection and clear save status.
@@ -9,7 +9,7 @@ Save high-signal X posts to your Notion ideas database in one click, with duplic
 ## Detailed Description
 Capture viral post ideas from X without breaking your flow.
 
-X to Notion Idea Saver adds a lightweight `Save idea` action directly on posts in `x.com`. Click once and the post is written to your Notion database with only the most important fields.
+Clip to Notion adds a lightweight `Save idea` action directly on posts in `x.com`. Click once and the post is written to your Notion database with only the most important fields.
 
 ### What it does
 - Adds an in-feed save action on X posts

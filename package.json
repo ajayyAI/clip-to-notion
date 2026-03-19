@@ -1,5 +1,5 @@
 {
-  "name": "x-to-notion-idea-saver",
+  "name": "clip-to-notion",
   "version": "0.1.0",
   "private": true,
   "description": "Chrome extension to save X posts into a Notion database.",

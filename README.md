@@ -1,4 +1,4 @@
-# X to Notion Idea Saver
+# Clip to Notion
 
 Chrome extension for saving X posts into a Notion database.
 

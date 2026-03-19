@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "X to Notion Idea Saver",
+  "name": "Clip to Notion",
   "version": "0.1.0",
   "description": "Save X posts to a Notion database with one click.",
   "icons": {
@@ -23,7 +23,7 @@
     }
   ],
   "action": {
-    "default_title": "X to Notion Idea Saver",
+    "default_title": "Clip to Notion",
     "default_icon": {
       "16": "assets/icons/icon16.png",
       "32": "assets/icons/icon32.png"
